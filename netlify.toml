@@ -1,0 +1,39 @@
+[build]
+  command = "pnpm build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "24"
+
+# A missing hashed file is a 404, never the SPA shell: otherwise an open tab asking for a chunk of
+# the previous deploy gets index.html cached as immutable by the /assets/* rule below. Rules are tried
+# in order and never shadow an existing file (no `force`); a missing /404.html gives Netlify's own page.
+[[redirects]]
+  from = "/assets/*"
+  to = "/404.html"
+  status = 404
+
+# SPA fallback — real files (assets, healthz.json) are served first.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # Security headers. connect-src lists every environment's API origin: this file cannot
+    # vary per environment, so a new API origin needs a change here, in
+    # deploy/cloudfront/response-headers-policy.json and in deploy/aws/stack.yml
+    # (`pnpm deploy:check` compares them; docs/deployment.md).
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://api.seed-test-static.example; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests"
+    Strict-Transport-Security = "max-age=63072000; includeSubDomains"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=()"
+    Cross-Origin-Opener-Policy = "same-origin"

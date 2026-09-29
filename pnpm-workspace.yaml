@@ -1,0 +1,27 @@
+# Single app: no packages list.
+
+# Exact versions in package.json; Renovate/Dependabot move them deliberately.
+saveExact: true
+
+# Supply chain: never install a version younger than 3 days (malicious releases are usually caught and
+# unpublished within hours). Dependabot uses the same delay
+# (.github/dependabot.yml cooldown).
+minimumReleaseAge: 4320
+
+# Dependency install scripts are blocked unless listed here. Decide each one the first `pnpm install`
+# reports — never set a blanket allow. Keep a comment with the reason for every `true`.
+allowBuilds:
+  esbuild: false # netlify-cli / vite toolchain: the binary ships as an optional dependency
+  lefthook: false # hooks are installed by the `prepare` script instead
+  msw: false # its postinstall only copies the service worker, which the project does not use
+  netlify-cli: false # postinstall only writes shell autocompletion and prints a welcome message
+  sharp: false # netlify-cli image CDN (ipx): prebuilt binaries ship as optional @img/sharp-* packages
+  unix-dgram: false # hot-shots (netlify-cli telemetry) optional native addon for unix sockets; not needed
+
+# A package published with weaker provenance than its previous version is refused.
+trustPolicy: no-downgrade
+trustPolicyExclude:
+  - 'why-is-node-running@3.2.2' # trust downgrade reported by pnpm install (transitive)
+  - 'semver@6.3.1' # trust downgrade reported by pnpm install (transitive)
+  - '@netlify/serverless-functions-api@2.23.0' # trust downgrade reported by pnpm install (transitive)
+  - '@netlify/serverless-functions-api@2.18.0' # trust downgrade reported by pnpm install (transitive)

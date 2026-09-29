@@ -1,0 +1,94 @@
+name: Deploy (netlify)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      ref:
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [preview, production]
+      ref:
+        description: Commit SHA to deploy (rollback); empty = the branch head
+        type: string
+        default: ''
+
+# Used as is when run by hand. When called from ci.yml, the caller must grant at least all of these:
+# a called workflow can lower the caller's permissions, never raise them.
+# No id-token: Netlify deploys with a token, and without OIDC this job cannot mint a cloud credential.
+permissions:
+  contents: read
+  pull-requests: write # the preview URL comment
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # One GitHub environment per target and stage: netlify-preview, netlify-production.
+    environment:
+      name: netlify-${{ inputs.environment }}
+      url: ${{ steps.deploy.outputs.url }}
+    # One deploy per target and environment at a time; a newer one waits instead of racing.
+    concurrency:
+      group: deploy-netlify-${{ inputs.environment }}-${{ inputs.environment == 'preview' && github.ref || 'main' }}
+      cancel-in-progress: false
+    env:
+      APP_VERSION: ${{ inputs.ref || github.sha }}
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_SITE_ID: ${{ vars.NETLIFY_SITE_ID }}
+      TARGET_ENV: ${{ inputs.environment }}
+      PREVIEW_ALIAS: pr-${{ github.event.number || github.run_number }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build and deploy
+        id: deploy
+        env:
+          VITE_API_BASE_URL: ${{ vars.API_BASE_URL }}
+          VITE_APP_VERSION: ${{ env.APP_VERSION }}
+        # `netlify deploy` builds first (netlify.toml [build]); `--build` is deprecated, `--no-build` opts out.
+        run: |
+          if [[ "$TARGET_ENV" == "production" ]]; then
+            out=$(pnpm exec netlify deploy --prod --json)
+            echo "url=$(jq -r '.url' <<<"$out")" >> "$GITHUB_OUTPUT"
+          else
+            out=$(pnpm exec netlify deploy --alias "$PREVIEW_ALIAS" --json)
+            echo "url=$(jq -r '.deploy_url' <<<"$out")" >> "$GITHUB_OUTPUT"
+          fi
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Smoke test the deployment
+        env:
+          E2E_BASE_URL: ${{ steps.deploy.outputs.url }}
+          EXPECTED_VERSION: ${{ env.APP_VERSION }}
+        run: pnpm e2e --project=chromium --grep @smoke
+      - name: Comment the preview URL on the pull request
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.number }}
+          URL: ${{ steps.deploy.outputs.url }}
+          MARKER: <!-- preview-url:netlify -->
+        run: |
+          # One comment per target, updated in place: found by its hidden marker.
+          body="$MARKER"$'\n'"Preview (netlify): $URL — \`$APP_VERSION\`"
+          id=$(gh api --paginate "repos/$REPO/issues/$PR_NUMBER/comments" \
+            --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" | head -n1)
+          if [[ -n "$id" ]]; then
+            gh api --method PATCH "repos/$REPO/issues/comments/$id" -f body="$body" > /dev/null
+          else
+            gh api --method POST "repos/$REPO/issues/$PR_NUMBER/comments" -f body="$body" > /dev/null
+          fi

@@ -1,0 +1,28 @@
+{
+  "app": {
+    "name": "Seed Test Static",
+    "skipToContent": "Saltar al contenido",
+    "nav": { "home": "Inicio", "items": "Elementos" },
+    "home": { "title": "Bienvenido a Seed Test Static" },
+    "error": { "title": "Algo salió mal.", "reload": "Recargar" },
+    "notFound": "No encontramos esta página."
+  },
+  "common": { "retry": "Reintentar", "back": "Volver", "loading": "Cargando…" },
+  "errors": {
+    "network": "Sin conexión. Revisa tu red e inténtalo de nuevo.",
+    "timeout": "El servidor tardó demasiado en responder.",
+    "unauthorized": "Tu sesión ha caducado. Vuelve a iniciar sesión.",
+    "forbidden": "No tienes acceso a esto.",
+    "notFound": "No encontramos lo que buscabas.",
+    "validation": "Recibimos datos que no pudimos leer.",
+    "server": "Algo salió mal de nuestro lado.",
+    "unknown": "Algo salió mal."
+  },
+  "items": {
+    "title": "Elementos",
+    "empty": "Todavía no hay nada aquí.",
+    "count": "{count, plural, one {# elemento} other {# elementos}}",
+    "updated": "Actualizado el {date, date, medium}",
+    "notFound": "Este elemento no existe."
+  }
+}

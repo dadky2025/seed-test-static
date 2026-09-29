@@ -1,0 +1,67 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    # Same as pnpm's minimumReleaseAge: never propose a version pnpm would refuse.
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 10
+    groups:
+      framework:
+        patterns:
+          - react
+          - react-dom
+          - '@types/react'
+          - '@types/react-dom'
+          - '@tanstack/react-router'
+          - '@tanstack/router-*'
+          - vite
+          - '@vitejs/*'
+          - '@rolldown/*'
+          - babel-plugin-react-compiler
+      lint-and-format:
+        patterns:
+          - eslint
+          - '@eslint/*'
+          - typescript-eslint
+          - eslint-plugin-*
+          - '@tanstack/eslint-plugin-query'
+          - '@vitest/eslint-plugin'
+          - eslint-config-prettier
+          - prettier
+          - prettier-plugin-*
+      testing:
+        patterns:
+          - vitest
+          - '@vitest/*'
+          - '@testing-library/*'
+          - jsdom
+          - msw
+          - '@axe-core/*'
+      playwright:
+        patterns:
+          - '@playwright/test'
+      node:
+        patterns:
+          - '@types/node'
+    ignore:
+      # typescript-eslint's peer range caps TypeScript (Phase 2.3) — lift when it widens.
+      - dependency-name: typescript
+        versions: ['>=6.1.0']
+      # @types/node stays on the Node major of .node-version; its major moves with Node's, by hand.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 10
+    groups:
+      github-actions:
+        patterns:
+          - '*'

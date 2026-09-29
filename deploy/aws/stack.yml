@@ -1,0 +1,256 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  seed-test-static - S3 + CloudFront hosting for the production SPA and the GitHub Actions OIDC deploy
+  role (environment aws-production). How to deploy and tear down: docs/deployment.md.
+
+Parameters:
+  CreateOidcProvider:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+    Description: >-
+      'false' when the account already has the token.actions.githubusercontent.com OIDC provider (an
+      account can have only one); the role then trusts the existing one.
+  GitHubRepository:
+    Type: String
+    Default: dadky2025/seed-test-static
+    AllowedPattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+'
+    Description: owner/name of the repository whose workflow assumes the deploy role.
+  GitHubEnvironment:
+    Type: String
+    Default: aws-production
+    AllowedPattern: '[A-Za-z0-9_.-]+'
+    Description: GitHub environment of the deploy job; the only token subject the role trusts.
+
+Conditions:
+  ShouldCreateOidcProvider: !Equals [!Ref CreateOidcProvider, 'true']
+
+Resources:
+  # ── GitHub OIDC ─────────────────────────────────────────────────────────────────────────────
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: ShouldCreateOidcProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-github-deploy'
+      Description: !Sub 'Assumed by GitHub Actions (${GitHubRepository}, environment ${GitHubEnvironment}) to deploy the site'
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - ShouldCreateOidcProvider
+                - !Ref GitHubOidcProvider
+                - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com'
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubRepository}:environment:${GitHubEnvironment}'
+      Policies:
+        - PolicyName: deploy-site
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ListTheBucket
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt SiteBucket.Arn
+              - Sid: WriteTheSiteFiles
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub '${SiteBucket.Arn}/*'
+              - Sid: InvalidateTheDistribution
+                Effect: Allow
+                Action:
+                  - cloudfront:CreateInvalidation
+                  - cloudfront:GetInvalidation
+                Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+
+  # ── Storage ─────────────────────────────────────────────────────────────────────────────────
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    # Teardown empties the bucket first (docs/deployment.md), then deletes the stack.
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-site-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      # No expiry of assets/: `aws s3 sync` skips unchanged hashed files, so an age-based rule would
+      # delete chunks the current index.html still loads.
+      LifecycleConfiguration:
+        Rules:
+          - Id: abort-incomplete-uploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Only this distribution, through Origin Access Control. ListBucket makes S3 answer 404
+          # (not 403) for a missing key; the viewer-request function rewrites "/" to /index.html and
+          # the cache policy forwards no query string, so nobody can list the bucket through CloudFront.
+          - Sid: AllowCloudFrontReadViaOac
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action:
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+              - !GetAtt SiteBucket.Arn
+              - !Sub '${SiteBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt SiteBucket.Arn
+              - !Sub '${SiteBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  # ── CloudFront ──────────────────────────────────────────────────────────────────────────────
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${AWS::StackName}-oac'
+        Description: CloudFront reads the private site bucket (SigV4)
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # The code must equal deploy/cloudfront/spa-rewrite.js (`pnpm deploy:check` compares them).
+  SpaRewriteFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub '${AWS::StackName}-spa-rewrite'
+      AutoPublish: true
+      FunctionConfig:
+        Comment: SPA fallback - extensionless paths get /index.html; missing files stay 404
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          const request = event.request;
+          const lastSegment = request.uri.slice(request.uri.lastIndexOf('/') + 1);
+          if (!lastSegment.includes('.')) {
+            request.uri = '/index.html';
+          }
+          return request;
+        }
+
+  # Same headers and values as netlify.toml (`pnpm deploy:check` compares them).
+  SecurityHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub '${AWS::StackName}-security-headers'
+        Comment: Security headers (same values as netlify.toml)
+        SecurityHeadersConfig:
+          ContentSecurityPolicy:
+            Override: true
+            ContentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://api.seed-test-static.example; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests"
+          StrictTransportSecurity:
+            Override: true
+            AccessControlMaxAgeSec: 63072000
+            IncludeSubdomains: true
+            Preload: false
+          ContentTypeOptions:
+            Override: true
+          ReferrerPolicy:
+            Override: true
+            ReferrerPolicy: strict-origin-when-cross-origin
+        CustomHeadersConfig:
+          Items:
+            - Header: Permissions-Policy
+              Value: camera=(), microphone=(), geolocation=(), payment=()
+              Override: true
+            - Header: Cross-Origin-Opener-Policy
+              Value: same-origin
+              Override: true
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub '${AWS::StackName} production'
+        Enabled: true
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: site-bucket
+            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        DefaultCacheBehavior:
+          TargetOriginId: site-bucket
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          # Managed "CachingOptimized": honours the Cache-Control the deploy sets per file
+          # (immutable for assets/, no-cache for the rest); no query string or cookie in the key.
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt SpaRewriteFunction.FunctionMetadata.FunctionARN
+        # The SPA fallback is the viewer-request function, not an error page: there is no 403/404 ->
+        # index.html mapping, so a missing file (a chunk of an older deploy) is a real 404. Errors are
+        # cached for 10 s only, so a file uploaded right after a miss is served at once.
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ErrorCachingMinTTL: 10
+          - ErrorCode: 404
+            ErrorCachingMinTTL: 10
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+Outputs:
+  RoleArn:
+    Description: GitHub variable AWS_ROLE_ARN (environment aws-production)
+    Value: !GetAtt DeployRole.Arn
+  BucketName:
+    Description: GitHub variable S3_BUCKET
+    Value: !Ref SiteBucket
+  DistributionId:
+    Description: GitHub variable CLOUDFRONT_DISTRIBUTION_ID
+    Value: !Ref Distribution
+  DistributionDomainName:
+    Description: GitHub variable PUBLIC_HOST
+    Value: !GetAtt Distribution.DomainName

@@ -1,0 +1,8 @@
+[
+  {
+    "name": "client JS (gzip)",
+    "path": "dist/assets/*.js",
+    "limit": "190 kB",
+    "gzip": true
+  }
+]

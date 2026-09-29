@@ -1,0 +1,17 @@
+pre-commit:
+  # piped: format first, then lint the formatted files — never both writing and reading at once.
+  piped: true
+  jobs:
+    - name: format
+      glob: '*.{ts,tsx,js,jsx,mjs,cjs,json,jsonc,css,md,yml,yaml}'
+      run: pnpm exec prettier --write --ignore-unknown {staged_files}
+      stage_fixed: true
+    - name: lint
+      glob: '*.{ts,tsx,js,jsx,mjs,cjs}'
+      # --no-warn-ignored: a staged ignored file (src/routeTree.gen.ts) would otherwise warn and fail.
+      run: pnpm exec eslint --max-warnings 0 --no-warn-ignored {staged_files}
+
+commit-msg:
+  jobs:
+    - name: message format
+      run: bash scripts/commit-msg {1}

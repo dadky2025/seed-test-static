@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Run by lefthook (commit-msg). Checks the first line of the commit message.
+set -euo pipefail
+
+first_line="$(head -n 1 "$1")"
+case "$first_line" in
+  Merge\ * | Revert\ * | fixup!\ * | squash!\ *) exit 0 ;;
+esac
+
+if (( ${#first_line} > 72 )); then
+  echo "commit-msg: first line is ${#first_line} characters; the limit is 72." >&2
+  exit 1
+fi

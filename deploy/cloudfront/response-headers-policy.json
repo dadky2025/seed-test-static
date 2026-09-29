@@ -1,0 +1,29 @@
+{
+  "Name": "seed-test-static-security-headers",
+  "Comment": "Security headers for every environment's distribution",
+  "SecurityHeadersConfig": {
+    "ContentSecurityPolicy": {
+      "Override": true,
+      "ContentSecurityPolicy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://api.seed-test-static.example; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests"
+    },
+    "StrictTransportSecurity": {
+      "Override": true,
+      "AccessControlMaxAgeSec": 63072000,
+      "IncludeSubdomains": true,
+      "Preload": false
+    },
+    "ContentTypeOptions": { "Override": true },
+    "ReferrerPolicy": { "Override": true, "ReferrerPolicy": "strict-origin-when-cross-origin" }
+  },
+  "CustomHeadersConfig": {
+    "Quantity": 2,
+    "Items": [
+      {
+        "Header": "Permissions-Policy",
+        "Value": "camera=(), microphone=(), geolocation=(), payment=()",
+        "Override": true
+      },
+      { "Header": "Cross-Origin-Opener-Policy", "Value": "same-origin", "Override": true }
+    ]
+  }
+}

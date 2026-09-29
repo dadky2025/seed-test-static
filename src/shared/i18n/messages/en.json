@@ -1,0 +1,28 @@
+{
+  "app": {
+    "name": "Seed Test Static",
+    "skipToContent": "Skip to content",
+    "nav": { "home": "Home", "items": "Items" },
+    "home": { "title": "Welcome to Seed Test Static" },
+    "error": { "title": "Something went wrong.", "reload": "Reload" },
+    "notFound": "We couldn't find this page."
+  },
+  "common": { "retry": "Try again", "back": "Back", "loading": "Loading…" },
+  "errors": {
+    "network": "No connection. Check your network and try again.",
+    "timeout": "The server took too long to answer.",
+    "unauthorized": "Your session has expired. Sign in again.",
+    "forbidden": "You don't have access to this.",
+    "notFound": "We couldn't find what you were looking for.",
+    "validation": "We received data we couldn't read.",
+    "server": "Something went wrong on our side.",
+    "unknown": "Something went wrong."
+  },
+  "items": {
+    "title": "Items",
+    "empty": "Nothing here yet.",
+    "count": "{count, plural, one {# item} other {# items}}",
+    "updated": "Updated {date, date, medium}",
+    "notFound": "This item doesn't exist."
+  }
+}

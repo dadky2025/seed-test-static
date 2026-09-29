@@ -1,0 +1,9 @@
+.seed/
+.plans/
+pnpm-lock.yaml
+src/routeTree.gen.ts
+dist/
+build/
+coverage/
+playwright-report/
+test-results/

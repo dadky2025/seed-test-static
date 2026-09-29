@@ -1,0 +1,42 @@
+# Dependencies & caches
+node_modules/
+.pnpm-store/
+.turbo/
+.eslintcache
+
+# Build output
+dist/
+build/
+.vercel/
+.netlify/
+# `netlify build` (edge-functions bundler) writes it; this project has no Deno code
+deno.lock
+.wrangler/
+.open-next/
+*.tsbuildinfo
+
+# Tests
+coverage/
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/
+
+# Env & secrets — .env.example is the only committed env file
+.env
+.env.*
+!.env.example
+.dev.vars*
+*.pem
+
+# Editors & OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.DS_Store
+Thumbs.db
+
+# Local agent & seed state
+.plans/
+.claude/settings.local.json

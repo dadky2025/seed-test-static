@@ -1,0 +1,93 @@
+name: Deploy (s3)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      ref:
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [production]
+      ref:
+        description: Commit SHA to deploy (rollback); empty = the branch head
+        type: string
+        default: ''
+
+# Used as is when run by hand. When called from ci.yml, the caller must grant at least all of these:
+# a called workflow can lower the caller's permissions, never raise them.
+permissions:
+  contents: read
+  id-token: write # OIDC to AWS: the role trusts only this repository's aws-<environment> environment
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30 # the CloudFront invalidation wait can take several minutes
+    # One GitHub environment per target and stage: aws-production (its name is in the role's trust policy).
+    environment:
+      name: aws-${{ inputs.environment }}
+      url: ${{ steps.deploy.outputs.url }}
+    # One deploy per target and environment at a time; a newer one waits instead of racing.
+    concurrency:
+      group: deploy-s3-${{ inputs.environment }}-main
+      cancel-in-progress: false
+    env:
+      APP_VERSION: ${{ inputs.ref || github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # AWS OIDC: no long-lived keys. The role, bucket and distribution come from deploy/aws/stack.yml.
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Build
+        env:
+          VITE_API_BASE_URL: ${{ vars.API_BASE_URL }}
+          VITE_APP_VERSION: ${{ env.APP_VERSION }}
+        run: pnpm build
+
+      - name: Upload
+        env:
+          BUCKET: ${{ vars.S3_BUCKET }}
+          OUT: dist
+          HASHED: assets
+        run: |
+          # 1. Hashed files first, cached forever. No --delete: tabs still open on the previous
+          #    version keep loading their chunks.
+          aws s3 sync "$OUT/$HASHED" "s3://$BUCKET/$HASHED" \
+            --cache-control "public, max-age=31536000, immutable"
+          # 2. Everything else (HTML, healthz.json, icons) last, always revalidated.
+          aws s3 sync "$OUT" "s3://$BUCKET" --exclude "$HASHED/*" --cache-control "no-cache"
+
+      - name: Invalidate
+        id: deploy
+        env:
+          DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+          PUBLIC_URL: https://${{ vars.PUBLIC_HOST }}
+        run: |
+          id=$(aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" \
+            --paths "/index.html" "/healthz.json" "/" --query Invalidation.Id --output text)
+          # The smoke test must read the new files, not the edge's cached copy.
+          aws cloudfront wait invalidation-completed --distribution-id "$DISTRIBUTION_ID" --id "$id"
+          echo "url=$PUBLIC_URL" >> "$GITHUB_OUTPUT"
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Smoke test the deployment
+        env:
+          E2E_BASE_URL: ${{ steps.deploy.outputs.url }}
+          EXPECTED_VERSION: ${{ env.APP_VERSION }}
+        run: pnpm e2e --project=chromium --grep @smoke
