@@ -16,6 +16,13 @@ Parameters:
     Default: dadky2025/seed-test-static
     AllowedPattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+'
     Description: owner/name of the repository whose workflow assumes the deploy role.
+  GitHubSubjectPrefix:
+    Type: String
+    AllowedPattern: 'repo:[A-Za-z0-9_.@-]+/[A-Za-z0-9_.@-]+'
+    Description: >-
+      The repository part of the OIDC token subject, exactly as GitHub issues it. Repositories with the
+      immutable subject (the default for new ones) use repo:owner@ownerId/name@repoId. Read it with
+      gh api repos/OWNER/NAME/actions/oidc/customization/sub --jq .sub_claim_prefix
   GitHubEnvironment:
     Type: String
     Default: aws-production
@@ -54,7 +61,7 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubRepository}:environment:${GitHubEnvironment}'
+                token.actions.githubusercontent.com:sub: !Sub '${GitHubSubjectPrefix}:environment:${GitHubEnvironment}'
       Policies:
         - PolicyName: deploy-site
           PolicyDocument:
